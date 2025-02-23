@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<head>
+  <meta charset="utf-8">
+  <title>Timely Log App</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    .container { max-width: 800px; margin: 0 auto; }
+    h1 { text-align: center; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    table, th, td { border: 1px solid #ccc; }
+    th, td { padding: 8px; text-align: left; }
+    /* Make the start time cell clickable */
+    .startTimeCell { cursor: pointer; }
+    #btnNewTime {
+      display: inline-block; width: 100%; padding: 15px; font-size: 18px;
+      background-color: #4CAF50; color: white; border: none; margin-top: 10px; cursor: pointer;
+    }
+    #btnNewTime:hover { background-color: #45a049; }
+    #settingsButton {
+      position: fixed; bottom: 20px; right: 20px;
+      background-color: #888; color: white; padding: 10px; border: none; cursor: pointer; border-radius: 50%;
+    }
+    /* Modal styles */
+    .modal-overlay {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background-color: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center;
+    }
+    .modal {
+      background: #fff; padding: 20px; min-width: 300px; border-radius: 5px;
+      max-height: 80vh; overflow-y: auto;
+    }
+    .close-modal { float: right; cursor: pointer; color: red; font-size: 24px; }
+    .category-list { margin-top: 15px; max-height: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 5px; }
+    .category-item {
+      border: 1px solid #ccc; padding: 8px; margin-bottom: 10px;
+    }
+    .category-item > .cat-main { display: flex; align-items: center; margin-bottom: 5px; }
+    .category-item input[type="text"] { flex: 1; margin-right: 5px; padding: 3px; }
+    .category-item input[type="color"] { margin-right: 5px; border: none; }
+    .deleteCategoryBtn { cursor: pointer; color: red; font-weight: bold; margin-left: 10px; font-size: 18px; }
+    .subcategory-list { margin-left: 20px; margin-top: 5px; }
+    .subcategory-item {
+      display: flex; align-items: center; margin-bottom: 5px;
+    }
+    .subcategory-item input[type="text"] { flex: 1; margin-right: 5px; padding: 3px; }
+    .deleteSubcategoryBtn { cursor: pointer; color: red; font-weight: bold; margin-left: 5px; }
+    .addSubcategoryBtn {
+      margin-top: 5px; padding: 5px 8px; cursor: pointer;
+      background-color: #4CAF50; color: white; border: none; border-radius: 3px;
+    }
+    #addCategoryBtn {
+      margin-top: 10px; padding: 8px 12px; cursor: pointer;
+      background-color: #4CAF50; color: white; border: none; border-radius: 3px;
+    }
+    #saveCategoriesBtn {
+      margin-top: 15px; padding: 8px 12px; cursor: pointer;
+      background-color: #007BFF; color: white; border: none; border-radius: 3px;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Timely Log — <span id="currentDate"></span></h1>
+  <!-- "New Time" button -->
+  <button id="btnNewTime">New Time</button>
+  <!-- Table with columns: Start, Category, Subcategory, Detail -->
+  <table id="recordTable">
+    <thead>
+      <tr>
+        <th>Start</th>
+        <th>Category</th>
+        <th>Subcategory</th>
+        <th>Detail</th>
+      </tr>
+    </thead>
+    <tbody>
+      <!-- Records loaded dynamically -->
+    </tbody>
+  </table>
+</div>
+<!-- Settings button -->
+<button id="settingsButton">Settings</button>
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal">
+    <span class="close-modal" id="closeModal">×</span>
+    <h2>Configure Categories</h2>
+    <div class="category-list" id="categoryList">
+      <!-- Category rows with nested subcategory lists are rendered here -->
+    </div>
+    <button id="addCategoryBtn">Add Category</button>
+    <br /><br />
+    <button id="saveCategoriesBtn">Save Categories</button>
+  </div>
+</div>
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script>
+  const today = new Date();
+  // Generate YYYY-MM-DD using browser's local time
+  const currentDateStr = today.toISOString().slice(0, 10);
+  $('#currentDate').text(currentDateStr);
+  
+  let gCategories = [];
+  
+  // Load categories from backend
+  function loadCategories(callback) {
+    console.log('Loading categories...');
+    $.ajax({
+      url: 'save.php',
+      type: 'POST',
+      data: { action: 'getCategories' },
+      dataType: 'json',
+      success: function(res) {
+        console.log('getCategories response:', res);
+        if (res.status === 'ok') {
+          gCategories = res.data;
+          renderCategoriesModal();
+          if (typeof callback === "function") { callback(); }
+        } else {
+          alert(res.message || 'Failed to load categories.');
+        }
+      },
+      error: function(err) { console.error('Error in getCategories:', err); }
+    });
+  }
+  
+  // Render categories in the modal with nested subcategory lists
+  function renderCategoriesModal() {
+    const $list = $('#categoryList');
+    $list.empty();
+    gCategories.forEach((cat, idx) => {
+      let subcategoryHTML = "";
+      if (cat.Subcategories && cat.Subcategories.trim() !== "") {
+        const subs = cat.Subcategories.split("|");
+        subs.forEach(sub => {
+          subcategoryHTML += `
+            <div class="subcategory-item">
+              <input type="text" class="subcategoryInput" value="${sub}" placeholder="Subcategory" />
+              <span class="deleteSubcategoryBtn">×</span>
+            </div>`;
+        });
+      }
+      const item = $(`
+        <div class="category-item">
+          <div class="cat-main">
+            <input type="text" class="categoryName" data-idx="${idx}" value="${cat.Category}" placeholder="Category Name" />
+            <input type="color" class="categoryColor" data-idx="${idx}" value="${cat.Color}" />
+            <span class="deleteCategoryBtn" data-idx="${idx}">×</span>
+          </div>
+          <div class="subcategory-list">
+            ${subcategoryHTML}
+          </div>
+          <button class="addSubcategoryBtn">Add Subcategory</button>
+        </div>
+      `);
+      $list.append(item);
+    });
+  }
+  
+  $('#addCategoryBtn').click(function() {
+    const newRow = $(`
+      <div class="category-item">
+        <div class="cat-main">
+          <input type="text" class="categoryName" placeholder="Category Name" />
+          <input type="color" class="categoryColor" value="#ffffff" />
+          <span class="deleteCategoryBtn">×</span>
+        </div>
+        <div class="subcategory-list"></div>
+        <button class="addSubcategoryBtn">Add Subcategory</button>
+      </div>
+    `);
+    $('#categoryList').append(newRow);
+  });
+  
+  $('#categoryList').on('click', '.deleteCategoryBtn', function() {
+    $(this).closest('.category-item').remove();
+  });
+  
+  $('#categoryList').on('click', '.addSubcategoryBtn', function() {
+    const newSubcategory = $(`
+      <div class="subcategory-item">
+        <input type="text" class="subcategoryInput" placeholder="Subcategory" />
+        <span class="deleteSubcategoryBtn">×</span>
+      </div>
+    `);
+    $(this).siblings('.subcategory-list').append(newSubcategory);
+  });
+  
+  $('#categoryList').on('click', '.deleteSubcategoryBtn', function() {
+    $(this).closest('.subcategory-item').remove();
+  });
+  
+  function loadRecords() {
+    console.log('Loading records for date:', currentDateStr);
+    $.ajax({
+      url: 'save.php',
+      type: 'POST',
+      data: { action: 'getRecords', date: currentDateStr },
+      dataType: 'json',
+      success: function(res) {
+        console.log('getRecords response:', res);
+        if (res.status === 'ok') { renderTable(res.data); }
+        else { alert(res.message || 'Failed to load records.'); }
+      },
+      error: function(err) { console.error('Error in getRecords:', err); }
+    });
+  }
+  
+  // Render table rows with stable data-row attribute for consistent indexing.
+  function renderTable(records) {
+    const $tbody = $('#recordTable tbody');
+    $tbody.empty();
+    records.forEach(function(record, i) {
+      const tr = $(`<tr data-row="${i}"></tr>`);
+      // Start time cell becomes clickable.
+      tr.append($("<td class='startTimeCell'></td>").text(record.starttime));
+      // Category cell with select.
+      const tdCategory = $('<td></td>');
+      const selectCategory = $('<select class="categorySelect"></select>');
+      selectCategory.attr('data-selected-category', record.category);
+      tdCategory.append(selectCategory);
+      tr.append(tdCategory);
+      // Subcategory cell with select.
+      const tdSubcategory = $('<td></td>');
+      const selectSubcategory = $('<select class="subcategorySelect"></select>');
+      selectSubcategory.attr('data-selected-subcategory', record.subcategory);
+      tdSubcategory.append(selectSubcategory);
+      tr.append(tdSubcategory);
+      // Detail cell with input.
+      const tdDetail = $('<td></td>');
+      const inputDetail = $('<input type="text" class="detailInput" />').val(record.detail);
+      tdDetail.append(inputDetail);
+      tr.append(tdDetail);
+      $tbody.append(tr);
+    });
+    loadCategoriesIntoSelect();
+  }
+  
+  // Helper: get stable row index from data-row attribute.
+  function getRowIndex($element) {
+    return parseInt($element.closest('tr').data('row'));
+  }
+  
+  function loadCategoriesIntoSelect() {
+    $('.categorySelect').each(function() {
+      const $sel = $(this);
+      const originalValue = $sel.attr('data-selected-category');
+      $sel.empty();
+      gCategories.forEach(cat => {
+        const option = $(`<option value="${cat.Category}">${cat.Category}</option>`);
+        $sel.append(option);
+      });
+      if (originalValue) { $sel.val(originalValue); } else { $sel.val(""); }
+      updateSubcategorySelect($sel);
+    });
+  }
+  
+  function updateSubcategorySelect($categorySelect) {
+    const categoryVal = $categorySelect.val();
+    const $subcategorySelect = $categorySelect.closest('tr').find('.subcategorySelect');
+    const originalSubcategory = $subcategorySelect.attr('data-selected-subcategory');
+    $subcategorySelect.empty();
+    const cat = gCategories.find(c => c.Category === categoryVal);
+    if (cat && cat.Subcategories && cat.Subcategories.trim() !== "") {
+      const subs = cat.Subcategories.split("|");
+      subs.forEach(sub => {
+        const option = $(`<option value="${sub}">${sub}</option>`);
+        $subcategorySelect.append(option);
+      });
+      $subcategorySelect.prop('disabled', false);
+      if (originalSubcategory) { $subcategorySelect.val(originalSubcategory); }
+      else { $subcategorySelect.val(""); }
+    } else {
+      $subcategorySelect.append('<option value="">(none)</option>');
+      $subcategorySelect.prop('disabled', true);
+      $subcategorySelect.val("");
+      saveFieldChange(getRowIndex($categorySelect), 'subcategory', "");
+    }
+  }
+  
+  $('#recordTable').on('change', '.categorySelect', function() {
+    const rowIndex = getRowIndex($(this));
+    const newValue = $(this).val();
+    saveFieldChange(rowIndex, 'category', newValue);
+    updateSubcategorySelect($(this));
+  });
+  
+  $('#recordTable').on('change', '.subcategorySelect', function() {
+    const rowIndex = getRowIndex($(this));
+    const newValue = $(this).val();
+    saveFieldChange(rowIndex, 'subcategory', newValue);
+  });
+  
+  $('#recordTable').on('change', '.detailInput', function() {
+    const rowIndex = getRowIndex($(this));
+    const newValue = $(this).val();
+    saveFieldChange(rowIndex, 'detail', newValue);
+  });
+  
+  // Make the start time cell clickable for editing.
+  $('#recordTable').on('click', '.startTimeCell', function() {
+    if ($(this).find('input').length > 0) return;
+    const currentText = $(this).text().trim();
+    const $input = $('<input type="text" class="editTimeInput" />').val(currentText);
+    $(this).empty().append($input);
+    $input.focus();
+  });
+  
+  // When the edit input loses focus or Enter is pressed, save the new time.
+  $('#recordTable').on('blur', '.editTimeInput', async function() {
+    const newValue = $(this).val().trim();
+    const $td = $(this).closest('td');
+    const rowIndex = getRowIndex($(this));
+
+    // First update the current row's starttime
+    await $.ajax({
+      url: 'save.php',
+      type: 'POST',
+      data: {
+        action: 'updateField',
+        date: currentDateStr,
+        rowIndex: rowIndex,
+        field: 'starttime',
+        value: newValue
+      },
+      dataType: 'json'
+    });
+
+    // Then update the previous row's endtime if it exists
+    if (rowIndex > 0) {
+      await $.ajax({
+        url: 'save.php',
+        type: 'POST',
+        data: {
+          action: 'updateField',
+          date: currentDateStr,
+          rowIndex: rowIndex - 1,
+          field: 'endtime',
+          value: newValue
+        },
+        dataType: 'json'
+      });
+    }
+
+    // Finally, reload the records to show the updated times
+    loadRecords();
+  });
+  
+  $('#recordTable').on('keydown', '.editTimeInput', function(e) {
+    if (e.key === 'Enter') { $(this).blur(); }
+  });
+  
+  function saveFieldChange(rowIndex, fieldName, fieldValue) {
+    console.log('Saving change:', rowIndex, fieldName, fieldValue);
+    $.ajax({
+      url: 'save.php',
+      type: 'POST',
+      data: {
+        action: 'updateField',
+        date: currentDateStr,
+        rowIndex: rowIndex,
+        field: fieldName,
+        value: fieldValue
+      },
+      dataType: 'json',
+      success: function(res) {
+        console.log('updateField response:', res);
+        if (res.status !== 'ok') { alert(res.message || 'Update failed.'); }
+      },
+      error: function(err) { console.error('Error in updateField:', err); }
+    });
+  }
+  
+  $('#btnNewTime').click(function() {
+    console.log('New record button pressed.');
+    $.ajax({
+      url: 'save.php',
+      type: 'POST',
+      data: { action: 'newRecord', date: currentDateStr },
+      dataType: 'json',
+      success: function(res) {
+        console.log('newRecord response:', res);
+        if (res.status === 'ok') { loadRecords(); }
+        else { alert(res.message || 'Failed to add record.'); }
+      },
+      error: function(err) { console.error('Error in newRecord:', err); }
+    });
+  });
+  
+  $('#saveCategoriesBtn').click(function() {
+    const newCats = [];
+    $('#categoryList .category-item').each(function() {
+      const name = $(this).find('.categoryName').val();
+      const color = $(this).find('.categoryColor').val();
+      let subcategoryArr = [];
+      $(this).find('.subcategoryInput').each(function() {
+        const sub = $(this).val();
+        if (sub.trim()) { subcategoryArr.push(sub.trim()); }
+      });
+      const subcategoriesStr = subcategoryArr.join("|");
+      if (name.trim()) { newCats.push({ Category: name.trim(), Color: color, Subcategories: subcategoriesStr }); }
+    });
+    console.log('Saving categories:', newCats);
+    $.ajax({
+      url: 'save.php',
+      type: 'POST',
+      data: {
+        action: 'saveCategories',
+        categories: JSON.stringify(newCats)
+      },
+      dataType: 'json',
+      success: function(res) {
+        console.log('saveCategories response:', res);
+        if (res.status === 'ok') {
+          gCategories = newCats;
+          alert('Categories updated');
+          loadRecords();
+        } else { alert(res.message || 'Failed to save categories.'); }
+      },
+      error: function(err) { console.error('Error in saveCategories:', err); }
+    });
+  });
+  
+  $('#settingsButton').click(function() {
+    $('#settingsModal').css('display', 'flex');
+    loadCategories();
+  });
+  $('#closeModal').click(function() { $('#settingsModal').hide(); });
+  
+  $(document).ready(function() {
+    loadCategories(function() { loadRecords(); });
+  });
+</script>
+</body>
+</html>
