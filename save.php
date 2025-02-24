@@ -19,7 +19,12 @@ function readCsvToArray($filePath) {
         $headers = fgetcsv($handle);
         while (($data = fgetcsv($handle)) !== false) {
             if (count($data) === count($headers)) {
-                $rows[] = array_combine($headers, $data);
+                $row = array_combine($headers, $data);
+                // Ensure each row has an ID
+                if (!isset($row['id'])) {
+                    $row['id'] = uniqid();
+                }
+                $rows[] = $row;
             }
         }
         fclose($handle);
@@ -37,15 +42,32 @@ function writeArrayToCsv($filePath, $data) {
     fclose($fp);
 }
 
+// Add version tracking function
+function getCurrentVersion($date) {
+    $filename = "data/{$date}.json";
+    if (file_exists($filename)) {
+        return filemtime($filename); // Use file modification time as version
+    }
+    return 0;
+}
+
 $action = isset($_POST['action']) ? $_POST['action'] : '';
 
-if ($action === 'getRecords') {
+if ($action === 'getVersion') {
+    $date = $_POST['date'];
+    echo json_encode([
+        'status' => 'ok',
+        'version' => getCurrentVersion($date)
+    ]);
+    exit;
+} elseif ($action === 'getRecords') {
     $date = $_POST['date'];
     $filename = $dataDir . '/' . $date . '.csv';
     $records = readCsvToArray($filename);
     // Initialize default row if file is empty.
     if (count($records) === 0) {
         $records[] = [
+            'id' => uniqid(),
             'starttime' => '00:00',
             'endtime'   => '23:59',
             'category'  => '',
@@ -54,7 +76,11 @@ if ($action === 'getRecords') {
         ];
         writeArrayToCsv($filename, $records);
     }
-    echo json_encode(['status' => 'ok', 'data' => $records]);
+    echo json_encode([
+        'status' => 'ok',
+        'data' => $records,
+        'version' => getCurrentVersion($date)
+    ]);
     exit;
 } elseif ($action === 'newRecord') {
     $date = $_POST['date'];
@@ -63,6 +89,7 @@ if ($action === 'getRecords') {
     $now = date('H:i');
     if (count($records) === 0) {
         $records[] = [
+            'id' => uniqid(),
             'starttime' => '00:00',
             'endtime'   => '23:59',
             'category'  => '',
@@ -73,6 +100,7 @@ if ($action === 'getRecords') {
         $lastIndex = count($records) - 1;
         $records[$lastIndex]['endtime'] = $now;
         $records[] = [
+            'id' => uniqid(),
             'starttime' => $now,
             'endtime'   => '23:59',
             'category'  => '',
@@ -85,29 +113,44 @@ if ($action === 'getRecords') {
     exit;
 } elseif ($action === 'updateField') {
     $date = $_POST['date'];
-    $rowIndex = intval($_POST['rowIndex']);
+    $recordId = $_POST['recordId']; // Change from rowIndex to recordId
     $field = $_POST['field'];
     $value = $_POST['value'];
+    $clientVersion = isset($_POST['version']) ? $_POST['version'] : 0;
+
+    // Check version before update
+    $currentVersion = getCurrentVersion($date);
+    if ($clientVersion !== $currentVersion) {
+        echo json_encode([
+            'status' => 'version_mismatch',
+            'message' => 'Data has been modified'
+        ]);
+        exit;
+    }
+
     $filename = $dataDir . '/' . $date . '.csv';
     $records = readCsvToArray($filename);
     
-    if (!isset($records[$rowIndex])) {
-        echo json_encode(['status' => 'error', 'message' => 'Row not found.']);
+    // Find record by ID instead of index
+    $found = false;
+    foreach ($records as &$record) {
+        if ($record['id'] === $recordId) {
+            $record[$field] = $value;
+            $found = true;
+            break;
+        }
+    }
+    
+    if (!$found) {
+        echo json_encode(['status' => 'error', 'message' => 'Record not found']);
         exit;
     }
     
-    $validFields = ['starttime', 'endtime', 'category', 'subcategory', 'detail'];
-    if (!in_array($field, $validFields)) {
-        echo json_encode(['status' => 'error', 'message' => 'Invalid field.']);
-        exit;
-    }
-    
-    // Update the specified field
-    $records[$rowIndex][$field] = $value;
-    
-    // Write the changes immediately
     writeArrayToCsv($filename, $records);
-    echo json_encode(['status' => 'ok']);
+    echo json_encode([
+        'status' => 'ok',
+        'version' => getCurrentVersion($date)
+    ]);
     exit;
 } elseif ($action === 'getCategories') {
     $cats = readCsvToArray($categoriesFile);
@@ -142,3 +185,4 @@ if ($action === 'getRecords') {
     echo json_encode(['status' => 'error', 'message' => 'Unknown action.']);
     exit;
 }
+?>

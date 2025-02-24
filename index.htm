@@ -100,7 +100,46 @@
     
     let gCategories = [];
     
-    // Load categories from backend
+    function loadRecords() {
+      console.log('Loading records for date:', currentDateStr);
+      $.ajax({
+        url: 'save.php',
+        type: 'POST',
+        data: { action: 'getRecords', date: currentDateStr },
+        dataType: 'json',
+        success: function(res) {
+          if (res.status === 'ok') { renderTable(res.data); }
+          else { alert(res.message || 'Failed to load records.'); }
+        },
+        error: function(err) { console.error('Error in getRecords:', err); }
+      });
+    }
+
+    function renderTable(records) {
+      const $tbody = $('#recordTable tbody');
+      $tbody.empty();
+      records.forEach(function(record) {
+        const tr = $(`<tr data-id="${record.id}"></tr>`);
+        tr.append($("<td class='startTimeCell'></td>").text(record.starttime));
+        const tdCategory = $('<td></td>');
+        const selectCategory = $('<select class="form-select form-select-sm categorySelect"></select>');
+        selectCategory.attr('data-selected-category', record.category);
+        tdCategory.append(selectCategory);
+        tr.append(tdCategory);
+        const tdSubcategory = $('<td></td>');
+        const selectSubcategory = $('<select class="form-select form-select-sm subcategorySelect"></select>');
+        selectSubcategory.attr('data-selected-subcategory', record.subcategory);
+        tdSubcategory.append(selectSubcategory);
+        tr.append(tdSubcategory);
+        const tdDetail = $('<td></td>');
+        const inputDetail = $('<input type="text" class="form-control form-control-sm detailInput" />').val(record.detail);
+        tdDetail.append(inputDetail);
+        tr.append(tdDetail);
+        $tbody.append(tr);
+      });
+      loadCategoriesIntoSelect();
+    }
+
     function loadCategories(callback) {
       console.log('Loading categories...');
       $.ajax({
@@ -122,7 +161,6 @@
       });
     }
     
-    // Render categories in the modal with nested subcategory lists
     function renderCategoriesModal() {
       const $list = $('#categoryList');
       $list.empty();
@@ -188,57 +226,6 @@
       $(this).closest('.subcategory-item').remove();
     });
     
-    function loadRecords() {
-      console.log('Loading records for date:', currentDateStr);
-      $.ajax({
-        url: 'save.php',
-        type: 'POST',
-        data: { action: 'getRecords', date: currentDateStr },
-        dataType: 'json',
-        success: function(res) {
-          console.log('getRecords response:', res);
-          if (res.status === 'ok') { renderTable(res.data); }
-          else { alert(res.message || 'Failed to load records.'); }
-        },
-        error: function(err) { console.error('Error in getRecords:', err); }
-      });
-    }
-    
-    // Render table rows with stable data-row attribute for consistent indexing.
-    function renderTable(records) {
-      const $tbody = $('#recordTable tbody');
-      $tbody.empty();
-      records.forEach(function(record, i) {
-        const tr = $(`<tr data-row="${i}"></tr>`);
-        // Start time cell becomes clickable.
-        tr.append($("<td class='startTimeCell'></td>").text(record.starttime));
-        // Category cell with select.
-        const tdCategory = $('<td></td>');
-        const selectCategory = $('<select class="form-select form-select-sm categorySelect"></select>');
-        selectCategory.attr('data-selected-category', record.category);
-        tdCategory.append(selectCategory);
-        tr.append(tdCategory);
-        // Subcategory cell with select.
-        const tdSubcategory = $('<td></td>');
-        const selectSubcategory = $('<select class="form-select form-select-sm subcategorySelect"></select>');
-        selectSubcategory.attr('data-selected-subcategory', record.subcategory);
-        tdSubcategory.append(selectSubcategory);
-        tr.append(tdSubcategory);
-        // Detail cell with input.
-        const tdDetail = $('<td></td>');
-        const inputDetail = $('<input type="text" class="form-control form-control-sm detailInput" />').val(record.detail);
-        tdDetail.append(inputDetail);
-        tr.append(tdDetail);
-        $tbody.append(tr);
-      });
-      loadCategoriesIntoSelect();
-    }
-    
-    // Helper: get stable row index from data-row attribute.
-    function getRowIndex($element) {
-      return parseInt($element.closest('tr').data('row'));
-    }
-    
     function loadCategoriesIntoSelect() {
       $('.categorySelect').each(function() {
         const $sel = $(this);
@@ -271,30 +258,29 @@
         $subcategorySelect.append('<option value="">(none)</option>');
         $subcategorySelect.prop('disabled', true);
         $subcategorySelect.val("");
-        saveFieldChange(getRowIndex($categorySelect), 'subcategory', "");
+        saveFieldChange($categorySelect.closest('tr').data('id'), 'subcategory', "");
       }
     }
     
     $('#recordTable').on('change', '.categorySelect', function() {
-      const rowIndex = getRowIndex($(this));
+      const recordId = $(this).closest('tr').data('id');
       const newValue = $(this).val();
-      saveFieldChange(rowIndex, 'category', newValue);
+      saveFieldChange(recordId, 'category', newValue);
       updateSubcategorySelect($(this));
     });
     
     $('#recordTable').on('change', '.subcategorySelect', function() {
-      const rowIndex = getRowIndex($(this));
+      const recordId = $(this).closest('tr').data('id');
       const newValue = $(this).val();
-      saveFieldChange(rowIndex, 'subcategory', newValue);
+      saveFieldChange(recordId, 'subcategory', newValue);
     });
     
     $('#recordTable').on('change', '.detailInput', function() {
-      const rowIndex = getRowIndex($(this));
+      const recordId = $(this).closest('tr').data('id');
       const newValue = $(this).val();
-      saveFieldChange(rowIndex, 'detail', newValue);
+      saveFieldChange(recordId, 'detail', newValue);
     });
     
-    // Make the start time cell clickable for editing.
     $('#recordTable').on('click', '.startTimeCell', function() {
       if ($(this).find('input').length > 0) return;
       const currentText = $(this).text().trim();
@@ -303,35 +289,33 @@
       $input.focus();
     });
     
-    // When the edit input loses focus or Enter is pressed, save the new time.
     $('#recordTable').on('blur', '.editTimeInput', async function() {
       const newValue = $(this).val().trim();
       const $td = $(this).closest('td');
-      const rowIndex = getRowIndex($(this));
+      const recordId = $td.closest('tr').data('id');
   
-      // First update the current row's starttime
       await $.ajax({
         url: 'save.php',
         type: 'POST',
         data: {
           action: 'updateField',
           date: currentDateStr,
-          rowIndex: rowIndex,
+          recordId: recordId,
           field: 'starttime',
           value: newValue
         },
         dataType: 'json'
       });
   
-      // Then update the previous row's endtime if it exists
-      if (rowIndex > 0) {
+      const prevRecordId = $td.closest('tr').prev().data('id');
+      if (prevRecordId) {
         await $.ajax({
           url: 'save.php',
           type: 'POST',
           data: {
             action: 'updateField',
             date: currentDateStr,
-            rowIndex: rowIndex - 1,
+            recordId: prevRecordId,
             field: 'endtime',
             value: newValue
           },
@@ -339,7 +323,6 @@
         });
       }
   
-      // Finally, reload the records to show the updated times
       loadRecords();
     });
     
@@ -347,24 +330,27 @@
       if (e.key === 'Enter') { $(this).blur(); }
     });
     
-    function saveFieldChange(rowIndex, fieldName, fieldValue) {
-      console.log('Saving change:', rowIndex, fieldName, fieldValue);
+    function saveFieldChange(recordId, fieldName, fieldValue) {
+      console.log('Saving change:', recordId, fieldName, fieldValue);
       $.ajax({
         url: 'save.php',
         type: 'POST',
         data: {
           action: 'updateField',
           date: currentDateStr,
-          rowIndex: rowIndex,
+          recordId: recordId,
           field: fieldName,
           value: fieldValue
         },
         dataType: 'json',
         success: function(res) {
-          console.log('updateField response:', res);
-          if (res.status !== 'ok') { alert(res.message || 'Update failed.'); }
+          if (res.status !== 'ok') {
+            alert(res.message || 'Update failed.');
+          }
         },
-        error: function(err) { console.error('Error in updateField:', err); }
+        error: function(err) {
+          console.error('Error in updateField:', err);
+        }
       });
     }
     
@@ -387,7 +373,6 @@
     $('#saveCategoriesBtn').click(function() {
       const newCats = [];
       $('#categoryList .category-item').each(function() {
-        // Fix class names to match the rendered elements
         const name = $(this).find('.form-control:not(.form-control-color)').val();
         const color = $(this).find('.form-control-color').val();
         let subcategoryArr = [];
@@ -397,7 +382,7 @@
         });
         const subcategoriesStr = subcategoryArr.join("|");
         
-        console.log('Processing category:', { name, color, subcategoriesStr }); // Debug logging
+        console.log('Processing category:', { name, color, subcategoriesStr });
         
         if (name && name.trim()) {
           newCats.push({
@@ -408,7 +393,7 @@
         }
       });
   
-      console.log('Saving categories:', newCats); // Debug logging
+      console.log('Saving categories:', newCats);
       
       if (newCats.length === 0) {
         alert('Please add at least one category with a name');
@@ -443,22 +428,24 @@
       });
     });
   
-    // Update the modal event handlers to use Bootstrap's events
     $('#settingsModal').on('show.bs.modal', function() {
       loadCategories();
     });
   
     $('#settingsModal').on('hide.bs.modal', function() {
-      // Optional: Add any cleanup code here
     });
   
-    // Remove the old modal handlers and update the settings button click
     $('#settingsButton').click(function() {
       $('#settingsModal').modal('show');
     });
     
     $(document).ready(function() {
-      loadCategories(function() { loadRecords(); });
+      loadCategories(function() {
+        loadRecords();
+      });
+    });
+
+    $(window).on('unload', function() {
     });
   </script>
 </body>
