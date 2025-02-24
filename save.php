@@ -91,9 +91,26 @@ if ($action === 'getRecords') {
     $filename = $dataDir . '/' . $date . '.csv';
     $records = readCsvToArray($filename);
     
-    if (!isset($records[$rowIndex])) {
-        echo json_encode(['status' => 'error', 'message' => 'Row not found.']);
-        exit;
+    // Initialize array if empty
+    if (empty($records)) {
+        $records = [[
+            'starttime' => '00:00',
+            'endtime'   => '23:59',
+            'category'  => '',
+            'subcategory' => '',
+            'detail'    => ''
+        ]];
+    }
+    
+    // Ensure the row exists by extending the array if needed
+    while (count($records) <= $rowIndex) {
+        $records[] = [
+            'starttime' => '00:00',
+            'endtime'   => '23:59',
+            'category'  => '',
+            'subcategory' => '',
+            'detail'    => ''
+        ];
     }
     
     $validFields = ['starttime', 'endtime', 'category', 'subcategory', 'detail'];
