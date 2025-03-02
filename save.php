@@ -104,13 +104,37 @@ if ($action === 'getRecords') {
     
     // Ensure the row exists by extending the array if needed
     while (count($records) <= $rowIndex) {
-        $records[] = [
-            'starttime' => '00:00',
-            'endtime'   => '23:59',
-            'category'  => '',
-            'subcategory' => '',
-            'detail'    => ''
-        ];
+        $prevIndex = count($records) - 1;
+        $lastRecord = ($prevIndex >= 0) ? $records[$prevIndex] : null;
+        
+        if ($lastRecord) {
+            // Get the last non-23:59 endtime
+            $lastValidTime = '00:00';
+            for ($i = $prevIndex; $i >= 0; $i--) {
+                if ($records[$i]['endtime'] !== '23:59') {
+                    $lastValidTime = $records[$i]['endtime'];
+                    break;
+                }
+            }
+            
+            // For subsequent rows, use last valid endtime
+            $records[] = [
+                'starttime' => $lastValidTime,
+                'endtime'   => '23:59',
+                'category'  => '',
+                'subcategory' => '',
+                'detail'    => ''
+            ];
+        } else {
+            // For the first row
+            $records[] = [
+                'starttime' => '00:00',
+                'endtime'   => '23:59',
+                'category'  => '',
+                'subcategory' => '',
+                'detail'    => ''
+            ];
+        }
     }
     
     $validFields = ['starttime', 'endtime', 'category', 'subcategory', 'detail'];
