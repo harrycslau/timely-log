@@ -4,83 +4,108 @@ header('Content-Type: application/json; charset=utf-8');
 // Set timezone to Helsinki
 date_default_timezone_set('Europe/Helsinki');
 
-// Define the data directory
+// Define the data directory and ensure it exists.
 $dataDir = __DIR__ . '/data';
 if (!is_dir($dataDir)) { mkdir($dataDir, 0777, true); }
 
-// Path to categories.csv
-$categoriesFile = __DIR__ . '/categories.csv';
+// Path to SQLite database file.
+$dbFile = $dataDir . '/app.db';
 
-// Helper function: read CSV into an array
-function readCsvToArray($filePath) {
-    $rows = array();
-    if (!file_exists($filePath)) { return $rows; }
-    if (($handle = fopen($filePath, 'r')) !== false) {
-        $headers = fgetcsv($handle);
-        while (($data = fgetcsv($handle)) !== false) {
-            if (count($data) === count($headers)) {
-                $rows[] = array_combine($headers, $data);
-            }
-        }
-        fclose($handle);
-    }
-    return $rows;
+try {
+    $db = new PDO("sqlite:" . $dbFile);
+    $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+} catch (Exception $e) {
+    echo json_encode(['status' => 'error', 'message' => 'Database connection failed: ' . $e->getMessage()]);
+    exit;
 }
 
-// Helper function: write an array to CSV (including header)
-function writeArrayToCsv($filePath, $data) {
-    if (empty($data)) { return; }
-    $fp = fopen($filePath, 'w');
-    $headers = array_keys($data[0]);
-    fputcsv($fp, $headers);
-    foreach ($data as $row) { fputcsv($fp, array_values($row)); }
-    fclose($fp);
+// Create tables if they do not exist.
+try {
+    $db->exec("CREATE TABLE IF NOT EXISTS records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT,
+        starttime TEXT,
+        endtime TEXT,
+        category TEXT,
+        subcategory TEXT,
+        detail TEXT
+    )");
+    $db->exec("CREATE TABLE IF NOT EXISTS categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        Category TEXT,
+        Color TEXT,
+        Subcategories TEXT
+    )");
+} catch (Exception $e) {
+    echo json_encode(['status' => 'error', 'message' => 'Database initialization failed: ' . $e->getMessage()]);
+    exit;
 }
 
+// Helper function: get all records for a given date ordered by insertion.
+function getRecords($db, $date) {
+    $stmt = $db->prepare("SELECT * FROM records WHERE date = ? ORDER BY id ASC");
+    $stmt->execute([$date]);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+// Helper function: insert a record.
+function insertRecord($db, $date, $starttime, $endtime, $category = '', $subcategory = '', $detail = '') {
+    $stmt = $db->prepare("INSERT INTO records (date, starttime, endtime, category, subcategory, detail) VALUES (?, ?, ?, ?, ?, ?)");
+    $stmt->execute([$date, $starttime, $endtime, $category, $subcategory, $detail]);
+    return $db->lastInsertId();
+}
+
+// Helper function: update a specific field in a record (field name is validated before use).
+function updateRecordField($db, $id, $field, $value) {
+    $stmt = $db->prepare("UPDATE records SET $field = ? WHERE id = ?");
+    $stmt->execute([$value, $id]);
+}
+
+// Helper functions for categories.
+function getCategories($db) {
+    $stmt = $db->prepare("SELECT Category, Color, Subcategories FROM categories ORDER BY id ASC");
+    $stmt->execute();
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function clearCategories($db) {
+    $db->exec("DELETE FROM categories");
+}
+
+function insertCategory($db, $Category, $Color, $Subcategories) {
+    $stmt = $db->prepare("INSERT INTO categories (Category, Color, Subcategories) VALUES (?, ?, ?)");
+    $stmt->execute([$Category, $Color, $Subcategories]);
+}
+
+// Determine the action.
 $action = isset($_POST['action']) ? $_POST['action'] : '';
 
 if ($action === 'getRecords') {
     $date = $_POST['date'];
-    $filename = $dataDir . '/' . $date . '.csv';
-    $records = readCsvToArray($filename);
-    // Initialize default row if file is empty.
+    $records = getRecords($db, $date);
+    // If no records exist, insert a default row.
     if (count($records) === 0) {
-        $records[] = [
-            'starttime' => '00:00',
-            'endtime'   => '23:59',
-            'category'  => '',
-            'subcategory' => '',
-            'detail'    => ''
-        ];
-        writeArrayToCsv($filename, $records);
+        insertRecord($db, $date, '00:00', '23:59', '', '', '');
+        $records = getRecords($db, $date);
     }
     echo json_encode(['status' => 'ok', 'data' => $records]);
     exit;
 } elseif ($action === 'newRecord') {
     $date = $_POST['date'];
-    $filename = $dataDir . '/' . $date . '.csv';
-    $records = readCsvToArray($filename);
+    $records = getRecords($db, $date);
     $now = date('H:i');
     if (count($records) === 0) {
-        $records[] = [
-            'starttime' => '00:00',
-            'endtime'   => '23:59',
-            'category'  => '',
-            'subcategory' => '',
-            'detail'    => ''
-        ];
+        // No record exists: insert a default row.
+        insertRecord($db, $date, '00:00', '23:59', '', '', '');
     } else {
-        $lastIndex = count($records) - 1;
-        $records[$lastIndex]['endtime'] = $now;
-        $records[] = [
-            'starttime' => $now,
-            'endtime'   => '23:59',
-            'category'  => '',
-            'subcategory' => '',
-            'detail'    => ''
-        ];
+        // Update the last record's endtime to the current time.
+        $lastRecord = end($records);
+        $lastId = $lastRecord['id'];
+        $stmt = $db->prepare("UPDATE records SET endtime = ? WHERE id = ?");
+        $stmt->execute([$now, $lastId]);
+        // Append a new record starting from the current time.
+        insertRecord($db, $date, $now, '23:59', '', '', '');
     }
-    writeArrayToCsv($filename, $records);
     echo json_encode(['status' => 'ok']);
     exit;
 } elseif ($action === 'updateField') {
@@ -88,54 +113,6 @@ if ($action === 'getRecords') {
     $rowIndex = intval($_POST['rowIndex']);
     $field = $_POST['field'];
     $value = $_POST['value'];
-    $filename = $dataDir . '/' . $date . '.csv';
-    $records = readCsvToArray($filename);
-    
-    // Initialize array if empty
-    if (empty($records)) {
-        $records = [[
-            'starttime' => '00:00',
-            'endtime'   => '23:59',
-            'category'  => '',
-            'subcategory' => '',
-            'detail'    => ''
-        ]];
-    }
-    
-    // Ensure the row exists by extending the array if needed
-    while (count($records) <= $rowIndex) {
-        $prevIndex = count($records) - 1;
-        $lastRecord = ($prevIndex >= 0) ? $records[$prevIndex] : null;
-        
-        if ($lastRecord) {
-            // Get the last non-23:59 endtime
-            $lastValidTime = '00:00';
-            for ($i = $prevIndex; $i >= 0; $i--) {
-                if ($records[$i]['endtime'] !== '23:59') {
-                    $lastValidTime = $records[$i]['endtime'];
-                    break;
-                }
-            }
-            
-            // For subsequent rows, use last valid endtime
-            $records[] = [
-                'starttime' => $lastValidTime,
-                'endtime'   => '23:59',
-                'category'  => '',
-                'subcategory' => '',
-                'detail'    => ''
-            ];
-        } else {
-            // For the first row
-            $records[] = [
-                'starttime' => '00:00',
-                'endtime'   => '23:59',
-                'category'  => '',
-                'subcategory' => '',
-                'detail'    => ''
-            ];
-        }
-    }
     
     $validFields = ['starttime', 'endtime', 'category', 'subcategory', 'detail'];
     if (!in_array($field, $validFields)) {
@@ -143,39 +120,50 @@ if ($action === 'getRecords') {
         exit;
     }
     
-    // Update the specified field
-    $records[$rowIndex][$field] = $value;
+    // Retrieve current records for the date.
+    $records = getRecords($db, $date);
+    // If the requested row index is out of range, extend the records.
+    while (count($records) <= $rowIndex) {
+        $prevCount = count($records);
+        if ($prevCount > 0) {
+            // Get the last record and determine a valid start time.
+            $lastRecord = $records[$prevCount - 1];
+            $lastValidTime = '00:00';
+            for ($i = $prevCount - 1; $i >= 0; $i--) {
+                if ($records[$i]['endtime'] !== '23:59') {
+                    $lastValidTime = $records[$i]['endtime'];
+                    break;
+                }
+            }
+            insertRecord($db, $date, $lastValidTime, '23:59', '', '', '');
+        } else {
+            insertRecord($db, $date, '00:00', '23:59', '', '', '');
+        }
+        $records = getRecords($db, $date);
+    }
     
-    // Write the changes immediately
-    writeArrayToCsv($filename, $records);
+    // Update the specified field in the record corresponding to rowIndex.
+    $record = $records[$rowIndex];
+    updateRecordField($db, $record['id'], $field, $value);
+    
     echo json_encode(['status' => 'ok']);
     exit;
 } elseif ($action === 'getCategories') {
-    $cats = readCsvToArray($categoriesFile);
+    $cats = getCategories($db);
     echo json_encode(['status' => 'ok', 'data' => $cats]);
     exit;
 } elseif ($action === 'saveCategories') {
     $categoriesJson = isset($_POST['categories']) ? $_POST['categories'] : '[]';
     $categoriesArr = json_decode($categoriesJson, true);
     error_log('Received categories: ' . print_r($categoriesArr, true)); // Debugging line
-    $dataToWrite = [];
+
+    // Clear existing categories.
+    clearCategories($db);
     foreach ($categoriesArr as $cat) {
-        $dataToWrite[] = [
-            'Category' => $cat['Category'],
-            'Color' => $cat['Color'],
-            'Subcategories' => isset($cat['Subcategories']) ? $cat['Subcategories'] : ''
-        ];
-    }
-    error_log('Data to write: ' . print_r($dataToWrite, true)); // Debugging line
-    if (!empty($dataToWrite)) {
-        $fp = fopen($categoriesFile, 'w');
-        fputcsv($fp, ['Category','Color','Subcategories']);
-        foreach ($dataToWrite as $row) {
-            fputcsv($fp, [$row['Category'], $row['Color'], $row['Subcategories']]);
-        }
-        fclose($fp);
-    } else {
-        file_put_contents($categoriesFile, "Category,Color,Subcategories\n");
+        $Category = isset($cat['Category']) ? $cat['Category'] : '';
+        $Color = isset($cat['Color']) ? $cat['Color'] : '';
+        $Subcategories = isset($cat['Subcategories']) ? $cat['Subcategories'] : '';
+        insertCategory($db, $Category, $Color, $Subcategories);
     }
     echo json_encode(['status' => 'ok']);
     exit;
@@ -183,3 +171,4 @@ if ($action === 'getRecords') {
     echo json_encode(['status' => 'error', 'message' => 'Unknown action.']);
     exit;
 }
+?>
