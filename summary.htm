@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Time Usage Summary</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .chart-container {
+            width: 800px;
+            margin: 20px auto;
+        }
+        .date-selector {
+            text-align: center;
+            margin: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="date-selector">
+        <label for="startDate">Start Date:</label>
+        <input type="date" id="startDate">
+        <label for="endDate">End Date:</label>
+        <input type="date" id="endDate">
+        <button onclick="loadCharts()">Update Charts</button>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="pieChart"></canvas>
+    </div>
+    <div class="chart-container">
+        <canvas id="barChart"></canvas>
+    </div>
+
+    <script>
+        // Set default dates to yesterday
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStr = yesterday.toISOString().split('T')[0];
+        document.getElementById('startDate').value = yesterdayStr;
+        document.getElementById('endDate').value = yesterdayStr;
+
+        let pieChartInstance = null;
+        let barChartInstance = null;
+
+        function loadCharts() {
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+
+            fetch('load.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `action=getSummary&startDate=${startDate}&endDate=${endDate}`
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'ok') {
+                    updateCharts(data.data);
+                } else {
+                    alert('Error loading data: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error loading data: ' + error.message);
+            });
+        }
+
+        function updateCharts(data) {
+            // Destroy existing charts if they exist
+            if (pieChartInstance) pieChartInstance.destroy();
+            if (barChartInstance) barChartInstance.destroy();
+
+            // Create new pie chart
+            pieChartInstance = new Chart(document.getElementById('pieChart'), {
+                type: 'pie',
+                data: {
+                    labels: data.categoryLabels,
+                    datasets: [{
+                        data: data.categoryHours,
+                        backgroundColor: data.categoryColors
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Time Distribution by Category'
+                        }
+                    }
+                }
+            });
+
+            // Create new bar chart
+            barChartInstance = new Chart(document.getElementById('barChart'), {
+                type: 'bar',
+                data: {
+                    labels: data.categoryLabels,
+                    datasets: data.subcategoryData.map(dataset => ({
+                        ...dataset,
+                        borderWidth: 1,
+                        borderColor: dataset.backgroundColor
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: { stacked: true },
+                        y: { 
+                            stacked: true,
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Hours'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'bottom'
+                        },
+                        title: {
+                            display: true,
+                            text: 'Time Distribution by Category and Subcategory'
+                        }
+                    }
+                }
+            });
+        }
+
+        // Load charts on page load
+        document.addEventListener('DOMContentLoaded', loadCharts);
+    </script>
+</body>
+</html>
