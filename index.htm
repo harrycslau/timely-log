@@ -7,6 +7,8 @@
   <link rel="icon" sizes="192x192" href="assets/icons/icon-192.png">
   <link rel="apple-touch-icon" href="assets/icons/icon-192.png">  
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Add Flatpickr CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
   <style>
     body { font-family: system-ui, sans-serif; }
     .startTimeCell { cursor: pointer; }
@@ -36,6 +38,10 @@
       .container { padding: 10px; }
       th, td { font-size: 0.9rem; }
       .category-item > .cat-main { flex-wrap: wrap; }
+    }
+    /* Add style for the time picker */
+    .flatpickr-input {
+      background-color: white;
     }
   </style>
 </head>
@@ -96,6 +102,8 @@
 
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <!-- Add Flatpickr JS -->
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
   <script>
     const today = new Date();
     // Generate YYYY-MM-DD using local timezone
@@ -300,58 +308,78 @@
       saveFieldChange(rowIndex, 'detail', newValue);
     });
     
-    // Make the start time cell clickable for editing.
+    // Make the start time cell clickable for showing a timepicker.
     $('#recordTable').on('click', '.startTimeCell', function() {
       if ($(this).find('input').length > 0) return;
+      
       const currentText = $(this).text().trim();
-      const $input = $('<input type="text" class="form-control form-control-sm editTimeInput" />').val(currentText);
+      const $input = $('<input type="text" class="form-control form-control-sm timepickerInput" />').val(currentText);
       $(this).empty().append($input);
-      $input.focus();
+      
+      // Initialize Flatpickr timepicker
+      const fpInstance = flatpickr($input[0], {
+        enableTime: true,
+        noCalendar: true,
+        dateFormat: "H:i",
+        time_24hr: true,
+        defaultDate: currentText,
+        onClose: function(selectedDates, dateStr) {
+          const rowIndex = getRowIndex($input);
+          updateTimeValue(rowIndex, dateStr);
+        }
+      });
+      
+      // Open the timepicker immediately
+      fpInstance.open();
+      
+      // When the user clicks outside, save the value
+      $input.on('blur', function() {
+        const rowIndex = getRowIndex($(this));
+        const newValue = $(this).val().trim();
+        updateTimeValue(rowIndex, newValue);
+      });
     });
     
-    // When the edit input loses focus or Enter is pressed, save the new time.
-    $('#recordTable').on('blur', '.editTimeInput', async function() {
-      const newValue = $(this).val().trim();
-      const $td = $(this).closest('td');
-      const rowIndex = getRowIndex($(this));
-  
-      // First update the current row's starttime
-      await $.ajax({
-        url: 'save.php',
-        type: 'POST',
-        data: {
-          action: 'updateField',
-          date: currentDateStr,
-          rowIndex: rowIndex,
-          field: 'starttime',
-          value: newValue
-        },
-        dataType: 'json'
-      });
-  
-      // Then update the previous row's endtime if it exists
-      if (rowIndex > 0) {
-        await $.ajax({
+    // Function to update time value in the database
+    async function updateTimeValue(rowIndex, newValue) {
+      try {
+        // First update the current row's starttime
+        const startTimeResponse = await $.ajax({
           url: 'save.php',
           type: 'POST',
           data: {
             action: 'updateField',
             date: currentDateStr,
-            rowIndex: rowIndex - 1,
-            field: 'endtime',
+            rowIndex: rowIndex,
+            field: 'starttime',
             value: newValue
           },
           dataType: 'json'
         });
+        
+        // Then update the previous row's endtime if it exists
+        if (rowIndex > 0) {
+          const endTimeResponse = await $.ajax({
+            url: 'save.php',
+            type: 'POST',
+            data: {
+              action: 'updateField',
+              date: currentDateStr,
+              rowIndex: rowIndex - 1,
+              field: 'endtime',
+              value: newValue
+            },
+            dataType: 'json'
+          });
+        }
+        
+        // Reload records to refresh the view
+        loadRecords();
+      } catch (error) {
+        console.error('Error updating time:', error);
+        alert('Failed to update time. Please try again.');
       }
-  
-      // Finally, reload the records to show the updated times
-      loadRecords();
-    });
-    
-    $('#recordTable').on('keydown', '.editTimeInput', function(e) {
-      if (e.key === 'Enter') { $(this).blur(); }
-    });
+    }
     
     function saveFieldChange(rowIndex, fieldName, fieldValue) {
       console.log('Saving change:', rowIndex, fieldName, fieldValue);
