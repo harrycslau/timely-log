@@ -61,6 +61,13 @@ function updateRecordField($db, $id, $field, $value) {
     $stmt->execute([$value, $id]);
 }
 
+// Helper function: delete a record by ID.
+function deleteRecordById($db, $id) {
+    $stmt = $db->prepare("DELETE FROM records WHERE id = ?");
+    $stmt->execute([$id]);
+    return $stmt->rowCount() > 0;
+}
+
 // Helper functions for categories.
 function getCategories($db) {
     $stmt = $db->prepare("SELECT Category, Color, Subcategories FROM categories ORDER BY id ASC");
@@ -166,6 +173,31 @@ if ($action === 'getRecords') {
         insertCategory($db, $Category, $Color, $Subcategories);
     }
     echo json_encode(['status' => 'ok']);
+    exit;
+} elseif ($action === 'deleteRecord') {
+    $date = $_POST['date'];
+    $rowIndex = intval($_POST['rowIndex']);
+    
+    // Retrieve current records for the date.
+    $records = getRecords($db, $date);
+    
+    // Check if the rowIndex is valid.
+    if ($rowIndex >= 0 && $rowIndex < count($records)) {
+        $recordId = $records[$rowIndex]['id'];
+        
+        if (deleteRecordById($db, $recordId)) {
+            // If there are no more records for this date, create a default one
+            $remainingRecords = getRecords($db, $date);
+            if (count($remainingRecords) === 0) {
+                insertRecord($db, $date, '00:00', '23:59', '', '', '');
+            }
+            echo json_encode(['status' => 'ok']);
+        } else {
+            echo json_encode(['status' => 'error', 'message' => 'Failed to delete record.']);
+        }
+    } else {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid record index.']);
+    }
     exit;
 } else {
     echo json_encode(['status' => 'error', 'message' => 'Unknown action.']);
